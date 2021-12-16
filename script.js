@@ -3,6 +3,7 @@
 class Workout {
 	date = new Date();
 	id = (Date.now() + '').slice(-10);
+	clicks = 0;
 
 	constructor(coords, distance, duration) {
 		// this.date = ... //? es6+ jer ovo gore van constructora jos kao valjda nije zvanicno podrzano.
@@ -20,6 +21,10 @@ class Workout {
 		this.description = `${this.type[0].toUpperCase()}${this.type.slice(
 			1
 		)} on ${months[this.date.getMonth()]} ${this.date.getDate()}`; // Running ili Cycling, da prvo slovo bude veliko. Potom kreiramo datum, dohvatamo mesec, vratice broj od 0 do 11, i onda taj broj stavljamo u months[taj_broj] i dohvatamo textualno mesec, i potom samo dan. Krajnje: Running on August 31
+	}
+
+	click() {
+		this.clicks++;
 	}
 }
 
@@ -70,19 +75,24 @@ const inputElevation = document.querySelector('.form__input--elevation');
 
 class App {
 	#map; //! private instance property
+	#mapZoomLevel = 13;
 	#mapEvent; //! private instance property
 	#workouts = [];
 
 	constructor() {
 		//! constructor je executed cim napravimo instancu new App(), sto znaci da bismo tu mogli da pozovemo ovaj _getPosition() metod
+		//? Get user position
 		this._getPosition();
+
+		//? Get data from local storage
+		this._getLocalStorage();
 
 		form.addEventListener('submit', this._newWorkout.bind(this)); //! obratiti paznju jer ovaj metod this._newWorkout ovde poziva event handler, a tu this oznacava element kom je event attached, dakle this koji koristimo u metodu _newWorkout ce ukazivati na form element. Zato ne treba pozivati kao this._newWorkout vec kao this._newWorkout.bind(this)
 
-		inputType.addEventListener(
-			'change',
-			this._toggleElevationField //! Ovde unutar ovog _toggleElevationField metoda nigde ne koristimo this keyword, zato tu ne moramo da bajndujemp
-		);
+		// prettier-ignore
+		inputType.addEventListener('change', this._toggleElevationField); //! Ovde unutar ovog _toggleElevationField metoda nigde ne koristimo this keyword, zato tu ne moramo da bajndujemp
+		// prettier-ignore
+		containerWorkouts.addEventListener('click', this._moveToPopup.bind(this));
 	}
 
 	_getPosition() {
@@ -105,7 +115,7 @@ class App {
 		const coords = [latitude, longitude];
 
 		console.log(this); //! UNDEFINED ?!?!? a to je jer smo ovu f-ju napisali gore u _getPosition kao: this._loadMap ali nismo je pozvali sa (). Poziva se kao regularna f-ja, a u regularnom f-on call-u, this keyword je undefined. Zato manuelno bindujemo to sa bind()
-		this.#map = L.map('map').setView(coords, 13); //? ovo map('map'), tj ovo map pod navodnicima je ID nas u htmlu koji imamo gde treba da smestimo mapu
+		this.#map = L.map('map').setView(coords, this.#mapZoomLevel); //? ovo map('map'), tj ovo map pod navodnicima je ID nas u htmlu koji imamo gde treba da smestimo mapu
 
 		L.tileLayer(
 			'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -118,6 +128,10 @@ class App {
 
 		//? Handling clicks on map
 		this.#map.on('click', this._showForm.bind(this));
+
+		this.#workouts.forEach(work => {
+			this._renderWorkoutMarker(work);
+		});
 	}
 	_showForm(mapE) {
 		this.#mapEvent = mapE; //! kopirali smo mapE u mapvent, jer ovde u ovom scope bloku nam ne treba mapE, ali jbg, samo odavde imamo pristup njoj, pa smo definisali globalnu varijablu sa let mapEvent i ovde joj dodelili vrednost mapE.
@@ -190,7 +204,7 @@ class App {
 
 		//? Add new objeect on map as marker
 		this.#workouts.push(workout);
-		console.log(workout, workout.type);
+		// console.log(workout, workout.type);
 
 		//? Render workout on map as marker
 		this._renderWorkoutMarker(workout);
@@ -200,6 +214,9 @@ class App {
 
 		//? Hide form + clear input fields
 		this._hideForm();
+
+		//? Set local storage to all workouts
+		this._setLocalStorage();
 	}
 	_renderWorkoutMarker(workout) {
 		L.marker(workout.coords)
@@ -269,6 +286,56 @@ class App {
 		//! Insertovacemo ovaj html ovde u HTML nakon form elementa, dakle kao sibling form elementu
 		form.insertAdjacentHTML('afterend', html);
 	}
+
+	_moveToPopup(e) {
+		const workoutEl = e.target.closest('.workout');
+		// console.log(workoutEl);
+
+		if (!workoutEl) return;
+
+		const workout = this.#workouts.find(
+			work => work.id === workoutEl.dataset.id
+		);
+
+		// console.log(workout);
+		this.#map.setView(workout.coords, this.#mapZoomLevel, {
+			animate: true,
+			pan: {
+				duration: 1,
+			},
+		});
+
+		//? using the PUBLIC interface
+		workout.click();
+	}
+
+	_setLocalStorage() {
+		localStorage.setItem('workouts', JSON.stringify(this.#workouts));
+	}
+	_getLocalStorage() {
+		//? Opaljuje se na pocetku, prilikom ucitavanja str, tj u constructoru klase App je. I tad je #workouts niz uvek biti prazan. Ali ako imamo vec neke podatke u LS, onda cemo ih dohvatiti i popuniti #workouts
+
+		const data = JSON.parse(localStorage.getItem('workouts'));
+
+		// Moramo da cekiramo da li ista ima u local storage. Ako nema bice undefined
+		if (!data) return;
+
+		// Ako ima data
+		this.#workouts = data;
+
+		this.#workouts.forEach(work => {
+			this._renderWorkout(work);
+			// this._renderWorkoutMarker(work) //! medjutim, ovo nece raditi, tj imacemo error, jer se ovde gde ovo koristimo #map jos nije ucitala. ZAto cemo premestiti gore u _loadMap()
+		});
+	}
+
+	reset() {
+		localStorage.removeItem('workouts');
+		location.reload();
+	}
 }
 const app = new App();
 // app._getPosition();
+//! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//! KADA KONVERTUJEMO OBJEKAT U STRING, PA POTOM STRING U OBJEKAT (KAO RECIMO ZA LOCAL STORAGE: JSON.STRINGIFY(), JSON.PARSE()), GUBIMO PROTOTYPE CHAIN, ZATO RECIMO ONAJ PUBLIC METOD CLICKS() NE RADI. ZATO POSTOJE PROBLEMI KAD SE RADI SA LOCALSTORAGE I OOP JAVASCRIPTOM
+//! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
